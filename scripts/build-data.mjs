@@ -151,7 +151,13 @@ async function previousArtists() {
 const SET_PICTURES = {};   // filled by setPictureSources()
 async function setPictureSources() {
   const [ptcg, scry, ygo, prev] = await Promise.all([
-    getText('https://api.pokemontcg.io/v2/sets?pageSize=250&select=id,name,images', 90000).then((t) => JSON.parse(t).data || []).catch((e) => { console.warn('  pokemontcg.io sets: ' + e.message); return null; }),
+    // pokemontcg.io's data repo on GitHub (newer than its API, which answered 500 from Actions, and its logos are
+    // ~20 KB on images.scrydex.com against ~200 KB); the API if GitHub doesn't answer
+    getText('https://raw.githubusercontent.com/PokemonTCG/pokemon-tcg-data/master/sets/en.json', 60000).then((t) => JSON.parse(t))
+      .catch((e) => {
+        console.warn('  pokemontcg.io data repo: ' + e.message);
+        return getJson('https://api.pokemontcg.io/v2/sets?pageSize=250&select=id,name,images', 2).then((d) => d.data || []);
+      }).catch((e) => { console.warn('  pokemontcg.io sets: ' + e.message); return null; }),
     getText('https://api.scryfall.com/sets', 60000).then((t) => JSON.parse(t).data || []).catch((e) => { console.warn('  Scryfall sets: ' + e.message); return null; }),
     getText('https://db.ygoprodeck.com/api/v7/cardsets.php', 60000).then((t) => JSON.parse(t)).catch((e) => { console.warn('  YGOPRODeck sets: ' + e.message); return null; }),
     getText(PREVIOUS + '/data/sets.json', 60000).then((t) => JSON.parse(t).sets || []).catch(() => [])
