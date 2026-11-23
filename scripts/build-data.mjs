@@ -203,7 +203,39 @@ async function pokemon(ctx) {
     s.series = (a && a.series) || eraOf(topCode) || eraOf(g && g.code) || null;
     s.code = topCode || (g && g.code) || null;
   }
-  return [...sets.values()];
+  return mergeSplitSets([...sets.values()]);
+}
+
+// Card.api names some sets two ways (the card API's "Scarlet & Violet" / "151", TCGplayer's "Scarlet & Violet Base
+// Set" / "Scarlet & Violet 151"), each holding part of the set's cards (owner's report, Nov 2026: Scarlet & Violet
+// base showed as two sets). Two sets are one when they have the same language and date, one name contains the
+// other, and their cards' most common printed total is the same (so "Scarlet & Violet Energies", same day, stays
+// apart). The longer (TCGplayer) name and its key win; a card already there (same product and printing) isn't added twice.
+function mergeSplitSets(list) {
+  const total = (s) => {
+    const n = {};
+    s.cards.forEach((c) => { const t = String(c.t || ''); if (t) n[t] = (n[t] || 0) + 1; });
+    return Object.keys(n).sort((a, b) => n[b] - n[a])[0] || null;
+  };
+  const kind = (id) => (String(id).match(/-(reverse|1st-edition[\w-]*|non-holo|holo)$/) || [])[1] || 'base';
+  const gone = new Set();
+  const bySize = list.slice().sort((a, b) => a.name.length - b.name.length);
+  for (const small of bySize) {
+    if (!small.date || gone.has(small)) continue;
+    const t = total(small), n = norm(small.name);
+    if (!t) continue;
+    const into = list.filter((big) => big !== small && !gone.has(big) && big.lang === small.lang && big.date === small.date &&
+      big.name.length > small.name.length && norm(big.name).includes(n) && total(big) === t);
+    if (into.length !== 1) continue;
+    const big = into[0];
+    const have = new Set(big.cards.map((c) => (c.pr || c.id) + '|' + kind(c.id)));
+    small.cards.forEach((c) => { if (!have.has((c.pr || c.id) + '|' + kind(c.id))) big.cards.push(c); });
+    big.code = big.code || small.code;
+    big.series = big.series || small.series;
+    gone.add(small);
+    console.log('  merged "' + small.name + '" (' + small.lang + ') into "' + big.name + '"');
+  }
+  return list.filter((s) => !gone.has(s));
 }
 
 // ---- Other games (tcgcsv) ----
