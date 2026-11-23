@@ -143,6 +143,97 @@ async function previousArtists() {
   try { return JSON.parse(await getText(PREVIOUS + '/data/artists.json', 60000)); } catch (e) { return {}; }
 }
 
+// ---- Set pictures (owner's request, Nov 2026: a card picture said little about a set) ----
+// Each set's `img` and its kind `ik`: 'logo' (English Pokémon: pokemontcg.io's set logos), 'symbol' (Magic:
+// Scryfall's set symbols, black SVGs), 'art' (Yu-Gi-Oh!: YGOPRODeck's set pictures), 'pack' (the set's own booster
+// pack / box from TCGplayer, for everything else with one), or 'card' (a card, the last resort). A source that
+// doesn't answer keeps last night's picture for the sets it covered.
+const SET_PICTURES = {};   // filled by setPictureSources()
+async function setPictureSources() {
+  const [ptcg, scry, ygo, prev] = await Promise.all([
+    getText('https://api.pokemontcg.io/v2/sets?pageSize=250&select=id,name,images', 90000).then((t) => JSON.parse(t).data || []).catch((e) => { console.warn('  pokemontcg.io sets: ' + e.message); return null; }),
+    getText('https://api.scryfall.com/sets', 60000).then((t) => JSON.parse(t).data || []).catch((e) => { console.warn('  Scryfall sets: ' + e.message); return null; }),
+    getText('https://db.ygoprodeck.com/api/v7/cardsets.php', 60000).then((t) => JSON.parse(t)).catch((e) => { console.warn('  YGOPRODeck sets: ' + e.message); return null; }),
+    getText(PREVIOUS + '/data/sets.json', 60000).then((t) => JSON.parse(t).sets || []).catch(() => [])
+  ]);
+  SET_PICTURES.ptcg = ptcg && { byId: {}, byName: {} };
+  (ptcg || []).forEach((s) => {
+    if (!s.images || !s.images.logo) return;
+    SET_PICTURES.ptcg.byId[s.id] = s.images.logo;
+    SET_PICTURES.ptcg.byName[setNameKey(s.name)] = s.images.logo;
+  });
+  SET_PICTURES.scry = scry && { byGroup: {}, byName: {} };
+  (scry || []).forEach((s) => {
+    if (!s.icon_svg_uri) return;
+    const icon = s.icon_svg_uri.replace(/\?.*$/, '');
+    if (s.tcgplayer_id) SET_PICTURES.scry.byGroup[s.tcgplayer_id] = icon;
+    SET_PICTURES.scry.byName[setNameKey(s.name)] = SET_PICTURES.scry.byName[setNameKey(s.name)] || icon;
+  });
+  SET_PICTURES.ygo = ygo && {};
+  (ygo || []).forEach((s) => { if (s.set_image) SET_PICTURES.ygo[setNameKey(s.set_name)] = s.set_image; });
+  SET_PICTURES.prev = {};
+  prev.forEach((s) => { if (s.ik && s.ik !== 'card' && s.ik !== 'pack') SET_PICTURES.prev[s.k] = { img: s.img, ik: s.ik }; });
+  console.log('Set pictures: ' + (ptcg ? Object.keys(SET_PICTURES.ptcg.byId).length : 'no') + ' Pokémon logos, ' +
+    (scry ? Object.keys(SET_PICTURES.scry.byGroup).length : 'no') + ' Magic symbols, ' + (ygo ? Object.keys(SET_PICTURES.ygo).length : 'no') + ' Yu-Gi-Oh! sets');
+}
+function setNameKey(name) { return norm(String(name || '').replace(/&/g, ' and ')); }
+// Our English Pokémon set names (TCGplayer's / the card API's) that pokemontcg.io names differently
+const PTCG_ALIASES = {
+  'sm base set': 'sm1', 'base set (shadowless)': 'base1', 'expedition': 'ecard1', 'wotc promo': 'basep',
+  'sm promos': 'smp', 'xy promos': 'xyp', 'black and white promos': 'bwp', 'diamond and pearl promos': 'dpp',
+  'hgss promos': 'hsp', 'sword & shield promo cards': 'swshp', 'nintendo promos': 'np', 'best of promos': 'bp',
+  'classic collection': 'cel25c', 'scarlet & violet 151': 'sv3pt5', "mcdonald's 25th anniversary promos": 'mcd21', 'generations: radiant collection': 'g1', 'legendary treasures: radiant collection': 'bw11'
+};
+function pokemonLogo(s) {
+  const p = SET_PICTURES.ptcg;
+  if (!p) return null;
+  // Most cards from the card API keep its IDs ("sv1-9"): the set they point to most
+  const votes = {};
+  s.cards.forEach((c) => { const m = /^([a-z0-9]+)-/i.exec(c.id); if (m && p.byId[m[1]]) votes[m[1]] = (votes[m[1]] || 0) + 1; });
+  const top = Object.keys(votes).sort((a, b) => votes[b] - votes[a])[0];
+  if (top) return p.byId[top];
+  const alias = PTCG_ALIASES[s.name.toLowerCase()];
+  if (alias && p.byId[alias]) return p.byId[alias];
+  // By name, also without "EX " / "SM - " / "XY - " in front or "Base Set" at the end
+  const names = [s.name, s.name.replace(/^(EX|SM|XY|SWSH|SV|ME)\s*-?\s+/, ''), s.name.replace(/\s+Base Set$/, ''), s.name + ' Base Set'];
+  for (const n of names) { const hit = p.byName[setNameKey(n)]; if (hit) return hit; }
+  return null;
+}
+// Scryfall's symbol by TCGplayer group; "Art Series: X" / "Promo Pack: X" and the like use X's
+function magicSymbol(s) {
+  const p = SET_PICTURES.scry;
+  if (!p) return null;
+  if (p.byGroup[s.groupId]) return p.byGroup[s.groupId];
+  const names = [s.name, s.name.replace(/^[^:]+:\s*/, ''), s.name.replace(/\s*\(.*\)$/, '')];
+  for (const n of names) { const hit = p.byName[setNameKey(n)]; if (hit) return hit; }
+  return null;
+}
+// The set's own booster pack, else its booster box, else any sealed product: TCGplayer's product picture
+function packPicture(cards) {
+  const sealed = cards.filter((c) => c.sd && c.pr);
+  const pick = sealed.find((c) => /booster pack/i.test(c.n) && !/(display|case|bundle|art|set of|\[)/i.test(c.n)) ||
+    sealed.find((c) => /booster pack/i.test(c.n)) || sealed.find((c) => /booster box/i.test(c.n) && !/case/i.test(c.n)) ||
+    sealed.find((c) => /booster/i.test(c.n));
+  return pick ? 'https://tcgplayer-cdn.tcgplayer.com/product/' + pick.pr + '_200w.jpg' : null;
+}
+function cardPicture(cards) {
+  const c = cards.find((x) => x.pr && !x.sd) || cards.find((x) => x.pr) || cards.find((x) => x.img);
+  if (!c) return '';
+  return c.pr ? 'https://tcgplayer-cdn.tcgplayer.com/product/' + c.pr + '_200w.jpg' : c.img;
+}
+function setPicture(s, key) {
+  let img = null, ik = null;
+  if (s.game === 'pokemon' && s.lang === 'en') { img = pokemonLogo(s); ik = 'logo'; }
+  else if (s.game === 'magic') { img = magicSymbol(s); ik = 'symbol'; }
+  else if (s.game === 'yugioh') { img = SET_PICTURES.ygo ? SET_PICTURES.ygo[setNameKey(s.name)] : null; ik = 'art'; }
+  // Its source didn't answer tonight: last night's
+  const sourceDown = (ik === 'logo' && !SET_PICTURES.ptcg) || (ik === 'symbol' && !SET_PICTURES.scry) || (ik === 'art' && !SET_PICTURES.ygo);
+  if (!img && sourceDown && SET_PICTURES.prev && SET_PICTURES.prev[key]) return SET_PICTURES.prev[key];
+  if (img) return { img, ik };
+  img = packPicture(s.cards);
+  return img ? { img, ik: 'pack' } : { img: cardPicture(s.cards), ik: 'card' };
+}
+
 // A card from a Card.api entry, in the set files' short field names
 function fromCardApi(id, c, staff, condMarket) {
   const product = (/product\/(\d+)/.exec(c.tcgUrl || '') || [])[1] || null;
@@ -269,7 +360,7 @@ async function tcgcsvGame(game, ctx) {
     // TCGplayer's set name as it is ("Marvel: Darkhold Destiny": no code prefix to strip outside Pokémon), its code
     // the abbreviation; sets grouped by year (these games have no eras in the data)
     const date = (g.publishedOn || '').slice(0, 10) || null;
-    const s = { game: game.id, lang: 'en', name: g.name, code: g.abbreviation || null,
+    const s = { game: game.id, lang: 'en', name: g.name, code: g.abbreviation || null, groupId: g.groupId,
       date, series: date ? date.slice(0, 4) : null, cards: [], keyBase: game.prefix + '-' + slug(g.name) };
     for (const p of products.results || []) {
       const number = ext(p, 'Number');
@@ -310,11 +401,6 @@ function writeJson(file, value) {
   fs.writeFileSync(file, text);
   return text.length;
 }
-function setPicture(cards) {
-  const c = cards.find((x) => x.pr && !x.sd) || cards.find((x) => x.pr) || cards.find((x) => x.img);
-  if (!c) return '';
-  return c.pr ? 'https://tcgplayer-cdn.tcgplayer.com/product/' + c.pr + '_200w.jpg' : c.img;
-}
 function sortCards(cards) {
   cards.sort((x, y) => {
     if (!!x.sd !== !!y.sd) return x.sd ? 1 : -1;   // sealed products after the cards
@@ -331,6 +417,7 @@ async function main() {
   const condStaff = (await cardApiFile('condition_prices.json', {})) || {};
   const rules = await cardApiFile('price_rules.json', {});
   const ctx = { staff: condStaff.prices || {}, condMarket: condMarket.prices || {}, artists: {} };
+  await setPictureSources();
 
   const all = [];
   const gamesOut = [];
@@ -358,8 +445,9 @@ async function main() {
     s.cards.forEach((c) => { if (c.t) totals[c.t] = (totals[c.t] || 0) + 1; });
     const total = Object.keys(totals).sort((x, y) => totals[y] - totals[x])[0] || null;
     const sealed = s.cards.filter((c) => c.sd).length;
+    const pic = setPicture(s, key);
     list.push({ k: key, game: s.game, name: s.name, lang: s.lang, series: s.series, date: s.date, code: s.code, total,
-      count: s.cards.length - sealed, sealed, img: setPicture(s.cards) });
+      count: s.cards.length - sealed, sealed, img: pic.img, ik: pic.ik });
   }
   list.sort((x, y) => (y.date || '').localeCompare(x.date || '') || x.name.localeCompare(y.name));
 
