@@ -5,7 +5,7 @@
 //   - Traditional Chinese: asia.pokemon-card.com/tw card search (by expansion code, number from each card's page)
 //   - Simplified Chinese: duanxr/PTCG-CHS-Datasets on GitHub (non-commercial use; pictures through cdn.jsdelivr.net)
 //   - Japanese: www.pokemon-card.com card search (cards from 2006 on; a set's folder found by its code, and checked
-//     with the Pokémon's Japanese names from PokéAPI's data when there are several), its small "thumb" pictures where the folder has them
+//     with the Pokémon's Japanese names from PokéAPI's data when there are several), its full-size pictures
 const UA = { 'User-Agent': 'Mozilla/5.0 (compatible; kms-collection-data-build)' };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -85,15 +85,14 @@ export function officialSources() {
     return folders;
   });
   // A folder's cards with their numbers
-  // Small "thumb" pictures exist for older folders only (newer ones answer 404): one look per folder
+  // Full-size pictures: the small "thumb" ones are missing for many cards, even within a folder
   const jpFolder = (folder) => once('jpf:' + folder, async () => {
     const out = [];
     const cards = (await ok(jpIndex()))[folder] || [];
-    const thumbs = cards.length && (await polite(JP + cards[0][2].replace('/large/', '/thumb/')).catch(() => null)) !== null;
     for (const [id, name, file] of cards) {
       const page = (await polite(JP + '/card-search/details.php/card/' + id + '/regu/all')) || '';
       const no = html((/<div class="subtext[^"]*">([\s\S]*?)<\/div>/.exec(page) || [])[1]);
-      out.push({ no: numKey(no), name, img: JP + (thumbs ? file.replace('/large/', '/thumb/') : file) });
+      out.push({ no: numKey(no), name, img: JP + file });
     }
     return out;
   });
