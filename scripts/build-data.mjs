@@ -7,7 +7,8 @@
 //   sets/<key>.json        one set's cards and sealed products, with pictures, prices and condition prices
 //   catalog-<game>.json    every card of a game in a compact table (search, folder rules, the card camera);
 //                          catalog.json = Pokémon's, for app builds from before games were added
-//   pricing.json           KMS's price rules (Card.api price_rules.json) and when condition prices were fetched
+//   pricing.json           KMS's price rules (Card.api price_rules.json), when condition prices were fetched, and
+//                          `condRatios`: condition / Near Mint ratios learned from them (scripts/cond-ratios.mjs)
 //   artists.json           the illustrator of each card, kept so a night the card API is down keeps last night's
 //   pictures.json          pictures for cards TCGplayer has none for, and what outside sources answered (scripts/images.mjs)
 //
@@ -24,6 +25,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { productCollector, addCardPictures, catalogPicture, writePictures, copyHostedPictures } from './images.mjs';
+import { conditionRatios } from './cond-ratios.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -825,7 +827,11 @@ async function main() {
     const gz = zlib.gzipSync(fs.readFileSync(path.join(OUT, 'catalog-' + g.id + '.json'))).length;
     summary.push(g.id + ' ' + rows.length + ' (' + Math.round(size / 1048576 * 10) / 10 + ' MB, ' + Math.round(gz / 1024) + ' KB gzipped)');
   }
-  writeJson(path.join(OUT, 'pricing.json'), { builtAt, rules: (rules.shops && rules.shops.kms) || null, conditionMarketAt: condMarket.fetchedAt || null });
+  // Learned condition prices for cards with no TCGplayer condition prices (scripts/cond-ratios.mjs)
+  const condRatios = conditionRatios(all, builtAt);
+  Object.entries(condRatios.check.byCondition).forEach(([k, v]) => console.log('  condition ' + k + ' on ' + v.cards +
+    ' held-out cards: learned ratios off by ' + v.learned.median + '% (median), flat percent by ' + v.flat.median + '%'));
+  writeJson(path.join(OUT, 'pricing.json'), { builtAt, rules: (rules.shops && rules.shops.kms) || null, conditionMarketAt: condMarket.fetchedAt || null, condRatios });
   writeJson(path.join(OUT, 'artists.json'), ctx.artists);
   console.log('Wrote ' + list.length + ' sets; cards per game: ' + summary.join(', ') + '. Set files ' + Math.round(bytes / 1048576) + ' MB.');
 }
