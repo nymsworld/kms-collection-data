@@ -9,6 +9,10 @@ workflow's Cloudflare token comes from the repo's Actions secrets (`CLOUDFLARE_A
   table: Pokémon from Card.api's prices.json; Magic, Yu-Gi-Oh! (and One Piece / Lorcana when turned on, the owner's
   plan) from tcgcsv's TCGplayer categories. Sealed products are in each set's file (`sd: 1`, after the cards).
   IDs follow Card.api's (`tcg-<product>`, `-foil`, `-1st-edition`, `-reverse`) so KMS staff prices line up.
+- Pokémon sets fixed up after reading (owner's reports, Nov 2026): `mergeSameName` joins a set listed twice under
+  one name with and without an accent (TCGplayer's "Pokemon GO" / "Pokémon GO"), `mergeSplitSets` one named two ways
+  ("Scarlet & Violet" / "… Base Set"), and `mcdonaldsEra` puts McDonald's promos in the era of their year (their
+  "M14"-style codes otherwise read as Mega Evolution).
 - `.github/workflows/build-data.yml`: nightly at 10:45 UTC, deploys `out/` to the Pages project
   `kms-collection-data`. A failing source fails the run: the live data stays on the last good night.
 - Local test: `node scripts/build-data.mjs --card-api ../Card.api --games pokemon` (any subset of games).

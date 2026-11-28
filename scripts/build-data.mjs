@@ -297,10 +297,50 @@ async function pokemon(ctx) {
     const g = groupInfo[s.lang === 'en' ? 'en' : 'ja'][norm(s.name)] || null;
     const a = s.lang === 'en' && api ? api.sets[norm(s.name)] : null;
     s.date = (a && a.date) || (g && g.date) || null;
-    s.series = (a && a.series) || eraOf(topCode) || eraOf(g && g.code) || null;
+    s.series = (a && a.series) || mcdonaldsEra(s.name) || eraOf(topCode) || eraOf(g && g.code) || null;
     s.code = topCode || (g && g.code) || null;
   }
-  return mergeSplitSets([...sets.values()]);
+  return mergeSplitSets(mergeSameName([...sets.values()]));
+}
+
+// McDonald's promos by their year (owner's report, Nov 2026: they all showed under Mega Evolution, because their codes
+// "M11"…"M26" look like Mega Evolution's "M1"…). The 25th Anniversary promos were 2021.
+const MCD_ERAS = [[2026, 'Mega Evolution'], [2023, 'Scarlet & Violet'], [2020, 'Sword & Shield'], [2017, 'Sun & Moon'],
+  [2014, 'XY'], [2011, 'Black & White']];
+function mcdonaldsEra(name) {
+  if (!/McDonald/i.test(name || '')) return null;
+  const y = /25th Anniversary/i.test(name) ? 2021 : +((/\b(20\d\d)\b/.exec(name) || [])[1] || 0);
+  const hit = y && MCD_ERAS.find(([from]) => y >= from);
+  return hit ? hit[1] : null;
+}
+
+// One set listed twice under the same name with and without an accent (owner's report, Nov 2026: TCGplayer's
+// "Pokemon GO" and "Pokémon GO" showed as two sets): same language, same date and the same name once accents and
+// punctuation are dropped → one set, under the one with more cards (its key wins); a card already there isn't added twice.
+function mergeSameName(list) {
+  const groups = new Map();
+  list.forEach((s) => {
+    const k = s.lang + '|' + (s.date || '') + '|' + norm(s.name);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(s);
+  });
+  const gone = new Set();
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    g.sort((a, b) => b.cards.length - a.cards.length);
+    const big = g[0], have = new Set(big.cards.map((c) => c.id));
+    // Shown with its accent ("Pokémon GO") whichever half had it; the key stays the bigger half's
+    big.name = g.map((s) => s.name).find((n) => /[^\x00-\x7f]/.test(n)) || big.name;
+    g.slice(1).forEach((small) => {
+      small.cards.forEach((c) => { if (!have.has(c.id)) { big.cards.push(c); have.add(c.id); } });
+      Object.keys(small.codes || {}).forEach((code) => { big.codes[code] = (big.codes[code] || 0) + small.codes[code]; });
+      big.series = big.series || small.series;
+      big.code = big.code || small.code;
+      gone.add(small);
+      console.log('  merged "' + small.name + '" (' + small.lang + ', ' + small.cards.length + ' cards) into "' + big.name + '"');
+    });
+  }
+  return list.filter((s) => !gone.has(s));
 }
 
 // Card.api names some sets two ways (the card API's "Scarlet & Violet" / "151", TCGplayer's "Scarlet & Violet Base
