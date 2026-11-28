@@ -47,6 +47,13 @@ workflow's Cloudflare token comes from the repo's Actions secrets (`CLOUDFLARE_A
   asks that its pictures be hosted, so they live in `pictures/ygo/` (+ `index.json`, by name), copied to the site
   as `/pictures/ygo/`; `node scripts/images.mjs --fetch-ygo` downloads the ones the live `pictures.json` `left`
   list still lacks (commit them). Never TCGplayer's site. The app's privacy page lists every picture host: add new ones.
+- `scripts/cond-ratios.mjs` (owner's request, Nov 28, 2026; never scrape TCGplayer): `pricing.json` `condRatios`, the
+  typical condition / Near Mint ratio (median, 1.5 IQR outliers dropped) learned from every card with real condition
+  prices (`cm`), by NM band (<$5, 5-20, 20-50, 50-200, 200+) x game x set age (vintage <2003, older <2017, modern) x
+  rarity group; a group is published per condition only with 12+ cards, and the app (kms-collection
+  `web/js/pricing.js` `learnedRatio`, same groups: keep them the same) walks `lookup` from finest to coarsest.
+  `check` = a 20% held-out test against the old flat percents (printed in the build log). The cards with `cm` are
+  Card.api's JustTCG choice (shop stock and cards over $50), mostly Pokémon.
 - `.github/workflows/build-data.yml`: nightly at 10:45 UTC, deploys `out/` to the Pages project
   `kms-collection-data`. A failing source fails the run: the live data stays on the last good night.
 - Local test: `node scripts/build-data.mjs --card-api ../Card.api --games pokemon` (any subset of games).
