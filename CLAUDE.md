@@ -43,7 +43,7 @@ workflow's Cloudflare token comes from the repo's Actions secrets (`CLOUDFLARE_A
   product), a product id, a URL or '-'. Then (owner's decision, Nov 2026: "scrape what we need to, it's not for
   profit") `scripts/official-pictures.mjs`: Traditional Chinese from asia.pokemon-card.com/tw, Simplified Chinese
   from the GitHub dataset duanxr/PTCG-CHS-Datasets (via cdn.jsdelivr.net), Japanese from www.pokemon-card.com (cards
-  from 2006 on; its "thumb" pictures). One request at a time per site; misses re-asked monthly. Yu-Gi-Oh!: YGOPRODeck
+  from 2006 on; full-size pictures, its thumbs are patchy). One request at a time per site; misses re-asked monthly. Yu-Gi-Oh!: YGOPRODeck
   asks that its pictures be hosted, so they live in `pictures/ygo/` (+ `index.json`, by name), copied to the site
   as `/pictures/ygo/`; `node scripts/images.mjs --fetch-ygo` downloads the ones the live `pictures.json` `left`
   list still lacks (commit them). Never TCGplayer's site. The app's privacy page lists every picture host: add new ones.
