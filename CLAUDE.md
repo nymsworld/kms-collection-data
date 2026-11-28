@@ -10,7 +10,8 @@ workflow's Cloudflare token comes from the repo's Actions secrets (`CLOUDFLARE_A
   plan) from tcgcsv's TCGplayer categories. Sealed products are in each set's file (`sd: 1`, after the cards).
   IDs follow Card.api's (`tcg-<product>`, `-foil`, `-1st-edition`, `-reverse`) so KMS staff prices line up.
 - Pokémon sets fixed up after reading (owner's reports, Nov 2026): `mergeSameName` joins a set listed twice under
-  one name with and without an accent (TCGplayer's "Pokemon GO" / "Pokémon GO"), `mergeSplitSets` one named two ways
+  one name apart from accents and punctuation (TCGplayer's "Pokemon GO" / "Pokémon GO", "Shining Fates Shiny Vault" /
+  "Shining Fates: Shiny Vault"; same language and date; letters of every script count, so Chinese names don't collide), `mergeSplitSets` one named two ways
   ("Scarlet & Violet" / "… Base Set"), and `mcdonaldsEra` puts McDonald's promos in the era of their year (their
   "M14"-style codes otherwise read as Mega Evolution).
 - `.github/workflows/build-data.yml`: nightly at 10:45 UTC, deploys `out/` to the Pages project

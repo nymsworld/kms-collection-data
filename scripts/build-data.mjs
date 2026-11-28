@@ -318,9 +318,13 @@ function mcdonaldsEra(name) {
 // "Pokemon GO" and "Pokémon GO" showed as two sets): same language, same date and the same name once accents and
 // punctuation are dropped → one set, under the one with more cards (its key wins); a card already there isn't added twice.
 function mergeSameName(list) {
+  // Letters of every script count ("超夢ex" and "ex初階牌組" aren't the same name), only accents and punctuation don't;
+  // a set with no date is never joined
+  const nameKey = (n) => String(n || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
   const groups = new Map();
   list.forEach((s) => {
-    const k = s.lang + '|' + (s.date || '') + '|' + norm(s.name);
+    if (!s.date) return;
+    const k = s.lang + '|' + s.date + '|' + nameKey(s.name);
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(s);
   });
