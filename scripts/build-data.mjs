@@ -8,6 +8,7 @@
 //                          catalog.json = Pokémon's, for app builds from before games were added
 //   pricing.json           KMS's price rules (Card.api price_rules.json) and when condition prices were fetched
 //   artists.json           the illustrator of each card, kept so a night the card API is down keeps last night's
+//   pictures.json          pictures for cards TCGplayer has none for, and what outside sources answered (scripts/images.mjs)
 //
 // Usage: node scripts/build-data.mjs [--card-api <folder or URL>] [--out out/data] [--previous <URL>] [--games a,b]
 //   --card-api defaults to Card.api on GitHub; a local folder (../Card.api) is faster for testing.
@@ -21,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import { productCollector, addCardPictures, catalogPicture, writePictures } from './images.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -405,6 +407,7 @@ async function tcgcsvGame(game, ctx) {
       [products, prices] = await Promise.all([getJson(TCGCSV + '/' + game.category + '/' + g.groupId + '/products'),
         getJson(TCGCSV + '/' + game.category + '/' + g.groupId + '/prices')]);
     } catch (e) { console.warn('  ' + game.id + ' ' + g.name + ': ' + e.message); return null; }
+    ctx.pictures.add(game.category, g.groupId, products.results);   // scripts/images.mjs
     const bySub = {};
     (prices.results || []).forEach((r) => { (bySub[r.productId] = bySub[r.productId] || []).push(r); });
     // TCGplayer's set name as it is ("Marvel: Darkhold Destiny": no code prefix to strip outside Pokémon), its code
@@ -466,7 +469,7 @@ async function main() {
   const condMarket = (await cardApiFile('condition_market.json', {})) || {};
   const condStaff = (await cardApiFile('condition_prices.json', {})) || {};
   const rules = await cardApiFile('price_rules.json', {});
-  const ctx = { staff: condStaff.prices || {}, condMarket: condMarket.prices || {}, artists: {} };
+  const ctx = { staff: condStaff.prices || {}, condMarket: condMarket.prices || {}, artists: {}, pictures: productCollector() };
   await setPictureSources();
 
   const all = [];
@@ -481,6 +484,10 @@ async function main() {
     all.push(...sets);
     gamesOut.push({ id: game.id, name: game.name });
   }
+
+  // Pictures for the cards TCGplayer has none for (scripts/images.mjs)
+  const prevPictures = await getText(PREVIOUS + '/data/pictures.json', 60000).then((t) => JSON.parse(t)).catch(() => null);
+  const pictures = await addCardPictures(all, ctx.pictures, prevPictures, gamesOut.map((g) => g.id));
 
   // Keys, totals, order
   const used = new Set();
@@ -509,6 +516,7 @@ async function main() {
   }
   const builtAt = new Date().toISOString();
   writeJson(path.join(OUT, 'sets.json'), { builtAt, games: gamesOut, sets: list });
+  writePictures(path.join(OUT, 'pictures.json'), pictures);
 
   // One compact table per game: string lists, then one row per card
   const setIndex = {};
@@ -525,11 +533,11 @@ async function main() {
     for (const s of all) {
       if (s.game !== g.id) continue;
       s.cards.forEach((c) => {
-        rows.push([c.id, c.n, setIndex[s.key], c.no, c.t, ix('rarities', c.r), c.pr || '', c.m, c.p, ix('artists', c.a), ix('kinds', c.k), c.ln || '', c.sd ? 1 : 0]);
+        rows.push([c.id, c.n, setIndex[s.key], c.no, c.t, ix('rarities', c.r), c.pr || '', c.m, c.p, ix('artists', c.a), ix('kinds', c.k), c.ln || '', c.sd ? 1 : 0, catalogPicture(c)]);
       });
     }
     const body = {
-      builtAt, game: g.id, cols: ['id', 'name', 'set', 'number', 'total', 'rarity', 'product', 'market', 'price', 'artist', 'kind', 'localName', 'sealed'],
+      builtAt, game: g.id, cols: ['id', 'name', 'set', 'number', 'total', 'rarity', 'product', 'market', 'price', 'artist', 'kind', 'localName', 'sealed', 'picture'],
       sets: list.map((s) => s.k), rarities: tables.rarities, artists: tables.artists, kinds: tables.kinds, cards: rows
     };
     const size = writeJson(path.join(OUT, 'catalog-' + g.id + '.json'), body);
