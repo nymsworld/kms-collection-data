@@ -7,19 +7,31 @@
 //   2. Magic: Scryfall's picture by TCGplayer id (api.scryfall.com/cards/tcgplayer/<id>; pictures on
 //      cards.scryfall.io, which Scryfall lets apps show).
 //   3. Pokémon: pokemontcg.io's data repo on GitHub (English, pictures on images.pokemontcg.io), then TCGdex
-//      (api.tcgdex.net, English and Japanese, pictures on assets.tcgdex.net), by set and number, name to confirm.
+//      (api.tcgdex.net, English and Japanese, pictures on assets.tcgdex.net), by set and number, name to confirm;
+//      then the official card databases and a Simplified Chinese dataset (scripts/official-pictures.mjs: Chinese and
+//      Japanese cards no card API has; owner's decision, Nov 2026).
+//   4. Yu-Gi-Oh!: YGOPRODeck's pictures, downloaded by hand into pictures/ygo/ and hosted on the data site (YGOPRODeck
+//      asks that its pictures be hosted, not shown from its server): `node scripts/images.mjs --fetch-ygo`.
 // A card TCGplayer has no picture for gets `ni: 1` (so the app doesn't ask TCGplayer for it), and `ip` or `img`.
 // What the outside sources answered is kept in pictures.json (published with the data), so a night asks them only
-// about cards it hasn't seen in a week; a source that's down keeps last night's answers.
-// Not used: Yu-Gi-Oh! (YGOPRODeck asks that its pictures be downloaded and hosted, not shown from its server) and
-// the Chinese cards TCGdex has no picture for (no free source; the official card database would mean scraping it).
+// about cards it hasn't seen lately; a source that's down keeps last night's answers. pictures.json's `left` lists
+// the cards still without a picture.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { officialSources } from './official-pictures.mjs';
 
 const UA = { 'User-Agent': 'kms-collection-data-build' };
 const TCGCSV = 'https://tcgcsv.com/tcgplayer';
 const POKEMON_CATEGORIES = { en: 3, ja: 85 };
-const RECHECK_DAYS = 7;
+const RECHECK_DAYS = 7;          // free card APIs: a miss is asked again after a week
+const RECHECK_OFFICIAL_DAYS = 30; // the official databases (scripts/official-pictures.mjs): after a month
+const CACHE_VERSION = 2;          // a new version forgets the old misses (sources were added)
+// Yu-Gi-Oh! pictures hosted on the data site (YGOPRODeck asks for that): pictures/ygo/ in this repo, copied to the
+// site by the build; `node scripts/images.mjs --fetch-ygo` downloads the ones the live data still lacks
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const YGO_DIR = path.join(REPO, 'pictures', 'ygo');
+const DATA_SITE = 'https://kms-collection-data.pages.dev';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function json(url, headers, tries = 3) {
@@ -122,7 +134,10 @@ function pokemonSources() {
 // sets: the build's sets ({ game, lang, name, code, cards }); collector: products of the tcgcsv games read tonight;
 // previous: last night's pictures.json. Returns tonight's pictures.json.
 export async function addCardPictures(sets, collector, previous, games) {
+  const sameVersion = previous && previous.v === CACHE_VERSION;
   const prevExt = (previous && previous.ext) || {};
+  let ygoIndex = {};
+  try { ygoIndex = JSON.parse(fs.readFileSync(path.join(YGO_DIR, 'index.json'), 'utf8')); } catch (e) { /* none yet */ }
   const today = new Date().toISOString().slice(0, 10);
   // Pokémon's products (Card.api gives only their ids)
   for (const lang of Object.keys(POKEMON_CATEGORIES)) {
@@ -146,17 +161,19 @@ export async function addCardPictures(sets, collector, previous, games) {
     const k3 = p.cat + '|' + b;
     if (!byName.has(k3)) byName.set(k3, id);
   }
-  const twin = (p) => {
+  const twin = (p, card) => {
     const b = baseName(p.name);
     const same = p.no && (byGroupNo.get(p.g + '|' + p.no) || []).find((x) => x[0] === b);
     if (same) return same[1];
     if (p.no && byNameNo.has(p.cat + '|' + b + '|' + p.no)) return byNameNo.get(p.cat + '|' + b + '|' + p.no);
     // Magic and Yu-Gi-Oh!: a card's name is the card (Pokémon has many cards of one name)
     if (p.cat !== 3 && p.cat !== 85 && byName.has(p.cat + '|' + b)) return byName.get(p.cat + '|' + b);
+    // Pokémon Trainer and Energy cards (World Championship decks, trainer kits): any printing of the same name
+    if (/trainer|energy/i.test((card && card.k) || '') || /energy$/.test(b)) return byName.get(p.cat + '|' + b) || null;
     return null;
   };
 
-  const stats = {}, ext = {}, sources = pokemonSources();
+  const stats = {}, ext = {}, sources = pokemonSources(), official = officialSources();
   const stat = (s, k) => { const key = s.game + ' ' + s.lang; stats[key] = stats[key] || { none: 0, twin: 0, outside: 0, left: 0 }; stats[key][k]++; };
   const outside = [];
   for (const s of sets) {
@@ -168,34 +185,46 @@ export async function addCardPictures(sets, collector, previous, games) {
       if (p ? p.ic > 0 : (c.pr ? !prevKnown : !!c.img)) continue;
       stat(s, 'none');
       if (c.pr) c.ni = 1;
-      const t = p ? twin(p) : (prevKnown && prevKnown !== 1 ? prevKnown : null);
+      const t = p ? twin(p, c) : (prevKnown && prevKnown !== 1 ? prevKnown : null);
       if (t) { c.ip = String(t); c.img = ''; stat(s, 'twin'); continue; }
       c.img = '';
       outside.push([s, c]);
     }
   }
   // Outside sources, a few at a time; cards answered within the week keep last night's answer
-  const cutoff = new Date(Date.now() - RECHECK_DAYS * 86400000).toISOString().slice(0, 10);
+  const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+  const cutoff = daysAgo(RECHECK_DAYS), cutoffOfficial = daysAgo(RECHECK_OFFICIAL_DAYS);
   let asked = 0;
+  const left = {};
   await pool(outside, 4, async ([s, c]) => {
+    // Yu-Gi-Oh!: our own copy of YGOPRODeck's picture, by name
+    if (s.game === 'yugioh') {
+      const file = ygoIndex[baseName(c.n)];
+      if (file) { c.img = DATA_SITE + '/pictures/ygo/' + file; stat(s, 'outside'); }
+      else { stat(s, 'left'); left[c.id] = [s.game, s.lang, s.name, c.n, c.no]; }
+      return;
+    }
     const prev = prevExt[c.id];
-    let url = '', at = today;
-    if (prev && (prev[0] || prev[1] >= cutoff)) { url = prev[0]; at = prev[1]; }
+    const slow = s.game === 'pokemon' && s.lang !== 'en';
+    let url = '', at = today, failed = false;
+    if (prev && (prev[0] || (sameVersion && prev[1] >= (slow ? cutoffOfficial : cutoff)))) { url = prev[0]; at = prev[1]; }
     else {
       asked++;
       try {
         if (s.game === 'magic' && c.pr) url = await scryfall(c.pr);
-        else if (s.game === 'pokemon') url = await sources.find(s, c);
-      } catch (e) { if (prev) { url = prev[0]; at = prev[1]; } }
+        else if (s.game === 'pokemon') url = (await sources.find(s, c)) || (await official.find(s, c));
+      } catch (e) { failed = true; if (prev) { url = prev[0]; at = prev[1]; } }
     }
-    ext[c.id] = [url, at];
-    if (url) { c.img = url; stat(s, 'outside'); } else stat(s, 'left');
+    // A source that failed tonight: no answer is kept, so tomorrow asks again
+    if (!(failed && !prev)) ext[c.id] = [url, at];
+    if (url) { c.img = url; stat(s, 'outside'); } else { stat(s, 'left'); left[c.id] = [s.game, s.lang, s.name, c.n, c.no]; }
   });
   const noPic = {};
   for (const s of sets) for (const c of s.cards) if (c.ni) noPic[c.id] = c.ip || 1;
   console.log('Card pictures (' + asked + ' asked outside tonight): ' + Object.keys(stats).sort().map((k) => k + ' ' + stats[k].none + ' missing, ' +
     stats[k].twin + ' from another printing, ' + stats[k].outside + ' from outside, ' + stats[k].left + ' still none').join('; '));
-  return { builtAt: new Date().toISOString(), stats, noPic, ext };
+  // left: the cards still without a picture (game, language, set, name, number), for whoever looks next
+  return { v: CACHE_VERSION, builtAt: new Date().toISOString(), stats, noPic, ext, left };
 }
 
 // The catalog's picture column: '' = the card's own product picture; a product id = that product's; a URL; '-' = none
@@ -208,4 +237,46 @@ export function catalogPicture(c) {
 export function writePictures(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(value));
+}
+
+// Copies pictures/ (our own Yu-Gi-Oh! pictures) next to the data on the site
+export function copyHostedPictures(outRoot) {
+  if (!fs.existsSync(YGO_DIR)) return;
+  fs.cpSync(path.join(REPO, 'pictures'), path.join(outRoot, 'pictures'), { recursive: true });
+}
+
+// node scripts/images.mjs --fetch-ygo: downloads YGOPRODeck's small picture of each Yu-Gi-Oh! card the live data
+// still has none for (pictures.json's `left`) into pictures/ygo/, and its name into pictures/ygo/index.json. Commit them.
+async function fetchYgo() {
+  // A local pictures.json (from a build) can stand in for the live one: node scripts/images.mjs --fetch-ygo <file>
+  const local = process.argv[process.argv.indexOf('--fetch-ygo') + 1];
+  const live = local ? JSON.parse(fs.readFileSync(local, 'utf8')) : await json(DATA_SITE + '/data/pictures.json');
+  const want = Object.values((live && live.left) || {}).filter((x) => x[0] === 'yugioh');
+  const all = ((await json('https://db.ygoprodeck.com/api/v7/cardinfo.php')) || {}).data || [];
+  const byName = {};
+  all.forEach((c) => { byName[baseName(c.name)] = byName[baseName(c.name)] || c; });
+  fs.mkdirSync(YGO_DIR, { recursive: true });
+  let index = {};
+  try { index = JSON.parse(fs.readFileSync(path.join(YGO_DIR, 'index.json'), 'utf8')); } catch (e) { /* new */ }
+  let got = 0, none = [];
+  for (const [, , , name] of want) {
+    const key = baseName(name);
+    if (index[key]) continue;
+    // "Token: Joey and Red-Eyes Black Dragon" is the token's own card; YGOPRODeck lists some tokens by name
+    const c = byName[key] || byName[baseName(String(name).replace(/^Token:\s*/i, ''))];
+    const img = c && c.card_images && c.card_images[0] && c.card_images[0].image_url_small;
+    if (!img) { none.push(name); continue; }
+    const res = await fetch(img, { headers: UA });
+    if (!res.ok) { none.push(name); continue; }
+    const file = c.card_images[0].id + '.jpg';
+    fs.writeFileSync(path.join(YGO_DIR, file), Buffer.from(await res.arrayBuffer()));
+    index[key] = file;
+    got++;
+    await sleep(100);   // YGOPRODeck: at most 20 requests a second
+  }
+  fs.writeFileSync(path.join(YGO_DIR, 'index.json'), JSON.stringify(index, null, 1));
+  console.log('Yu-Gi-Oh! pictures: ' + got + ' downloaded, ' + none.length + ' not on YGOPRODeck' + (none.length ? ': ' + none.join('; ') : ''));
+}
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv.includes('--fetch-ygo')) {
+  fetchYgo().catch((e) => { console.error(e); process.exit(1); });
 }

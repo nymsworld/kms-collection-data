@@ -40,8 +40,13 @@ workflow's Cloudflare token comes from the repo's Actions secrets (`CLOUDFLARE_A
   product with a picture: same set + number, same name + number, Magic / Yu-Gi-Oh! also name alone) or `img` from
   Scryfall (Magic, by TCGplayer id), pokemontcg.io's data repo / TCGdex (Pokémon, set + number). Outside answers are
   cached in the published `pictures.json` (misses re-asked weekly). The catalog's last column `picture` = '' (own
-  product), a product id, a URL or '-'. Not used: YGOPRODeck (asks to self-host its pictures) and scraping the
-  official Chinese card database; the app's privacy page lists every picture host, so add any new one there.
+  product), a product id, a URL or '-'. Then (owner's decision, Nov 2026: "scrape what we need to, it's not for
+  profit") `scripts/official-pictures.mjs`: Traditional Chinese from asia.pokemon-card.com/tw, Simplified Chinese
+  from the GitHub dataset duanxr/PTCG-CHS-Datasets (via cdn.jsdelivr.net), Japanese from www.pokemon-card.com (cards
+  from 2006 on; its "thumb" pictures). One request at a time per site; misses re-asked monthly. Yu-Gi-Oh!: YGOPRODeck
+  asks that its pictures be hosted, so they live in `pictures/ygo/` (+ `index.json`, by name), copied to the site
+  as `/pictures/ygo/`; `node scripts/images.mjs --fetch-ygo` downloads the ones the live `pictures.json` `left`
+  list still lacks (commit them). Never TCGplayer's site. The app's privacy page lists every picture host: add new ones.
 - `.github/workflows/build-data.yml`: nightly at 10:45 UTC, deploys `out/` to the Pages project
   `kms-collection-data`. A failing source fails the run: the live data stays on the last good night.
 - Local test: `node scripts/build-data.mjs --card-api ../Card.api --games pokemon` (any subset of games).

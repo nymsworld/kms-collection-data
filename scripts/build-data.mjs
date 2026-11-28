@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { productCollector, addCardPictures, catalogPicture, writePictures } from './images.mjs';
+import { productCollector, addCardPictures, catalogPicture, writePictures, copyHostedPictures } from './images.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -796,6 +796,7 @@ async function main() {
   Object.keys(moved.sets).forEach((k) => { if (allKeys.has(k) || !allKeys.has(moved.sets[k])) delete moved.sets[k]; });
   writeJson(path.join(OUT, 'sets.json'), { builtAt, games: gamesOut, sets: list, moved });
   writePictures(path.join(OUT, 'pictures.json'), pictures);
+  copyHostedPictures(path.dirname(OUT));
 
   // One compact table per game: string lists, then one row per card
   const setIndex = {};
