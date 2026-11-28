@@ -30,8 +30,27 @@ jobs:
         with:
           node-version: 22
 
+      # Small copies of big card pictures (scripts/hosted-pictures.mjs): sharp resizes them, and the copies made so far
+      # are kept between nights (a copy missing here is taken from the live site before being made again)
+      - name: Install sharp
+        run: npm install --no-save --no-package-lock sharp@0.35.5
+
+      - name: Restore Picture Copies
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/pictures
+          key: pictures-${{ github.run_id }}
+          restore-keys: pictures-
+
       - name: Build Card Data
         run: node scripts/build-data.mjs
+
+      - name: Save Picture Copies
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/pictures
+          key: pictures-${{ github.run_id }}
 
       - name: Add Headers
         run: node scripts/headers.mjs

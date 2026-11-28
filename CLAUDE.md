@@ -43,10 +43,16 @@ workflow's Cloudflare token comes from the repo's Actions secrets (`CLOUDFLARE_A
   product), a product id, a URL or '-'. Then (owner's decision, Nov 2026: "scrape what we need to, it's not for
   profit") `scripts/official-pictures.mjs`: Traditional Chinese from asia.pokemon-card.com/tw, Simplified Chinese
   from the GitHub dataset duanxr/PTCG-CHS-Datasets (via cdn.jsdelivr.net), Japanese from www.pokemon-card.com (cards
-  from 2006 on; full-size pictures, its thumbs are patchy). One request at a time per site; misses re-asked monthly. Yu-Gi-Oh!: YGOPRODeck
-  asks that its pictures be hosted, so they live in `pictures/ygo/` (+ `index.json`, by name), copied to the site
-  as `/pictures/ygo/`; `node scripts/images.mjs --fetch-ygo` downloads the ones the live `pictures.json` `left`
-  list still lacks (commit them). Never TCGplayer's site. The app's privacy page lists every picture host: add new ones.
+  from 2006 on; full-size pictures, its thumbs are patchy). One request at a time per site; misses re-asked monthly. Yu-Gi-Oh!: YGOPRODeck's
+  picture by card name (cardinfo.php, nightly for cards not looked up that week). Never TCGplayer's site. The app's
+  privacy page lists every picture host: add new ones.
+- `scripts/hosted-pictures.mjs` (owner's request, Nov 2026): big pictures (official Pokémon sites, the jsDelivr dataset,
+  pokemontcg.io PNGs; 165-300 KB) get a 250 px WebP copy (~15-20 KB) on the data site at `/pictures/s/<sha1>.webp`
+  (`img` = copy, `il` = original for the card window); YGOPRODeck's are copied as they are to `/pictures/ygo/` and
+  never shown from its server (YGOPRODeck asks for that). Copies are kept between nights in `.cache/pictures` by
+  actions/cache (a missing one is taken from the live site, else made again); needs `sharp` (the workflow installs
+  it; `npm install --no-save --no-package-lock sharp@0.35.5` locally, without it originals are kept). `pictures/ygo/`
+  in the repo = the first hand-downloaded copies (seed).
 - `scripts/cond-ratios.mjs` (owner's request, Nov 28, 2026; never scrape TCGplayer): `pricing.json` `condRatios`, the
   typical condition / Near Mint ratio (median, 1.5 IQR outliers dropped) learned from every card with real condition
   prices (`cm`), by NM band (<$5, 5-20, 20-50, 50-200, 200+) x game x set age (vintage <2003, older <2017, modern) x

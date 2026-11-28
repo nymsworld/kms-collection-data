@@ -24,7 +24,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { productCollector, addCardPictures, catalogPicture, writePictures, copyHostedPictures } from './images.mjs';
+import { productCollector, addCardPictures, catalogPicture, writePictures } from './images.mjs';
+import { hostPictures } from './hosted-pictures.mjs';
 import { conditionRatios } from './cond-ratios.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -759,6 +760,7 @@ async function main() {
   // Pictures for the cards TCGplayer has none for (scripts/images.mjs)
   const prevPictures = await getText(PREVIOUS + '/data/pictures.json', 60000).then((t) => JSON.parse(t)).catch(() => null);
   const pictures = await addCardPictures(all, ctx.pictures, prevPictures, gamesOut.map((g) => g.id));
+  await hostPictures(all, path.dirname(OUT));   // small copies on the data site (scripts/hosted-pictures.mjs)
 
   // Keys, totals, order
   const used = new Set();
@@ -798,7 +800,6 @@ async function main() {
   Object.keys(moved.sets).forEach((k) => { if (allKeys.has(k) || !allKeys.has(moved.sets[k])) delete moved.sets[k]; });
   writeJson(path.join(OUT, 'sets.json'), { builtAt, games: gamesOut, sets: list, moved });
   writePictures(path.join(OUT, 'pictures.json'), pictures);
-  copyHostedPictures(path.dirname(OUT));
 
   // One compact table per game: string lists, then one row per card
   const setIndex = {};

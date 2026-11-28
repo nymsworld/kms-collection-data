@@ -10,15 +10,15 @@
 //      (api.tcgdex.net, English and Japanese, pictures on assets.tcgdex.net), by set and number, name to confirm;
 //      then the official card databases and a Simplified Chinese dataset (scripts/official-pictures.mjs: Chinese and
 //      Japanese cards no card API has; owner's decision, Nov 2026).
-//   4. Yu-Gi-Oh!: YGOPRODeck's pictures, downloaded by hand into pictures/ygo/ and hosted on the data site (YGOPRODeck
-//      asks that its pictures be hosted, not shown from its server): `node scripts/images.mjs --fetch-ygo`.
+//   4. Yu-Gi-Oh!: YGOPRODeck's picture by card name (db.ygoprodeck.com/api/v7/cardinfo.php); scripts/hosted-pictures.mjs
+//      copies it to the data site (YGOPRODeck asks that its pictures be hosted, not shown from its server).
+// Big pictures get small copies on the data site too (scripts/hosted-pictures.mjs, after this step).
 // A card TCGplayer has no picture for gets `ni: 1` (so the app doesn't ask TCGplayer for it), and `ip` or `img`.
 // What the outside sources answered is kept in pictures.json (published with the data), so a night asks them only
 // about cards it hasn't seen lately; a source that's down keeps last night's answers. pictures.json's `left` lists
 // the cards still without a picture.
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { officialSources } from './official-pictures.mjs';
 
 const UA = { 'User-Agent': 'kms-collection-data-build' };
@@ -27,11 +27,6 @@ const POKEMON_CATEGORIES = { en: 3, ja: 85 };
 const RECHECK_DAYS = 7;          // free card APIs: a miss is asked again after a week
 const RECHECK_OFFICIAL_DAYS = 30; // the official databases (scripts/official-pictures.mjs): after a month
 const CACHE_VERSION = 4;          // a new version forgets the old misses (sources were added)
-// Yu-Gi-Oh! pictures hosted on the data site (YGOPRODeck asks for that): pictures/ygo/ in this repo, copied to the
-// site by the build; `node scripts/images.mjs --fetch-ygo` downloads the ones the live data still lacks
-const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const YGO_DIR = path.join(REPO, 'pictures', 'ygo');
-const DATA_SITE = 'https://kms-collection-data.pages.dev';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function json(url, headers, tries = 3) {
@@ -83,6 +78,22 @@ async function tcgcsvCategory(collector, category) {
 }
 
 // ---- Outside sources ----
+// YGOPRODeck: every card once a night (only when a Yu-Gi-Oh! card is looked up), its small picture by name.
+// "Token: Joey and Red-Eyes Black Dragon" is the token's own card; YGOPRODeck lists some tokens by name.
+let ygoCards = null;
+async function ygoprodeck(name) {
+  if (!ygoCards) {
+    ygoCards = json('https://db.ygoprodeck.com/api/v7/cardinfo.php').then((d) => {
+      const byName = {};
+      ((d && d.data) || []).forEach((c) => { const k = baseName(c.name); if (!byName[k]) byName[k] = c; });
+      return byName;
+    });
+  }
+  const byName = await ygoCards;
+  const c = byName[baseName(name)] || byName[baseName(String(name).replace(/^Token:\s*/i, ''))];
+  const img = c && c.card_images && c.card_images[0] && c.card_images[0].image_url_small;
+  return /^https:\/\/images\.ygoprodeck\.com\/images\/cards_small\/\d+\.jpg$/.test(img || '') ? img : '';
+}
 async function scryfall(productId) {
   const c = await json('https://api.scryfall.com/cards/tcgplayer/' + productId, { Accept: 'application/json' }, 2);
   await sleep(120);   // Scryfall asks for 50-100 ms between requests
@@ -136,8 +147,6 @@ function pokemonSources() {
 export async function addCardPictures(sets, collector, previous, games) {
   const sameVersion = previous && previous.v === CACHE_VERSION;
   const prevExt = (previous && previous.ext) || {};
-  let ygoIndex = {};
-  try { ygoIndex = JSON.parse(fs.readFileSync(path.join(YGO_DIR, 'index.json'), 'utf8')); } catch (e) { /* none yet */ }
   const today = new Date().toISOString().slice(0, 10);
   // Pokémon's products (Card.api gives only their ids)
   for (const lang of Object.keys(POKEMON_CATEGORIES)) {
@@ -197,13 +206,6 @@ export async function addCardPictures(sets, collector, previous, games) {
   let asked = 0;
   const left = {};
   await pool(outside, 4, async ([s, c]) => {
-    // Yu-Gi-Oh!: our own copy of YGOPRODeck's picture, by name
-    if (s.game === 'yugioh') {
-      const file = ygoIndex[baseName(c.n)];
-      if (file) { c.img = DATA_SITE + '/pictures/ygo/' + file; stat(s, 'outside'); }
-      else { stat(s, 'left'); left[c.id] = [s.game, s.lang, s.name, c.n, c.no]; }
-      return;
-    }
     let prev = prevExt[c.id];
     // Versions 2-3 kept Japanese "thumb" links, many of which don't exist: ask those again
     if (prev && previous.v < 4 && /\/card_images\/thumb\//.test(prev[0])) prev = null;
@@ -214,6 +216,7 @@ export async function addCardPictures(sets, collector, previous, games) {
       asked++;
       try {
         if (s.game === 'magic' && c.pr) url = await scryfall(c.pr);
+        else if (s.game === 'yugioh') url = await ygoprodeck(c.n);
         else if (s.game === 'pokemon') url = (await sources.find(s, c)) || (await official.find(s, c));
       } catch (e) { failed = true; if (prev) { url = prev[0]; at = prev[1]; } }
     }
@@ -239,46 +242,4 @@ export function catalogPicture(c) {
 export function writePictures(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(value));
-}
-
-// Copies pictures/ (our own Yu-Gi-Oh! pictures) next to the data on the site
-export function copyHostedPictures(outRoot) {
-  if (!fs.existsSync(YGO_DIR)) return;
-  fs.cpSync(path.join(REPO, 'pictures'), path.join(outRoot, 'pictures'), { recursive: true });
-}
-
-// node scripts/images.mjs --fetch-ygo: downloads YGOPRODeck's small picture of each Yu-Gi-Oh! card the live data
-// still has none for (pictures.json's `left`) into pictures/ygo/, and its name into pictures/ygo/index.json. Commit them.
-async function fetchYgo() {
-  // A local pictures.json (from a build) can stand in for the live one: node scripts/images.mjs --fetch-ygo <file>
-  const local = process.argv[process.argv.indexOf('--fetch-ygo') + 1];
-  const live = local ? JSON.parse(fs.readFileSync(local, 'utf8')) : await json(DATA_SITE + '/data/pictures.json');
-  const want = Object.values((live && live.left) || {}).filter((x) => x[0] === 'yugioh');
-  const all = ((await json('https://db.ygoprodeck.com/api/v7/cardinfo.php')) || {}).data || [];
-  const byName = {};
-  all.forEach((c) => { byName[baseName(c.name)] = byName[baseName(c.name)] || c; });
-  fs.mkdirSync(YGO_DIR, { recursive: true });
-  let index = {};
-  try { index = JSON.parse(fs.readFileSync(path.join(YGO_DIR, 'index.json'), 'utf8')); } catch (e) { /* new */ }
-  let got = 0, none = [];
-  for (const [, , , name] of want) {
-    const key = baseName(name);
-    if (index[key]) continue;
-    // "Token: Joey and Red-Eyes Black Dragon" is the token's own card; YGOPRODeck lists some tokens by name
-    const c = byName[key] || byName[baseName(String(name).replace(/^Token:\s*/i, ''))];
-    const img = c && c.card_images && c.card_images[0] && c.card_images[0].image_url_small;
-    if (!img) { none.push(name); continue; }
-    const res = await fetch(img, { headers: UA });
-    if (!res.ok) { none.push(name); continue; }
-    const file = c.card_images[0].id + '.jpg';
-    fs.writeFileSync(path.join(YGO_DIR, file), Buffer.from(await res.arrayBuffer()));
-    index[key] = file;
-    got++;
-    await sleep(100);   // YGOPRODeck: at most 20 requests a second
-  }
-  fs.writeFileSync(path.join(YGO_DIR, 'index.json'), JSON.stringify(index, null, 1));
-  console.log('Yu-Gi-Oh! pictures: ' + got + ' downloaded, ' + none.length + ' not on YGOPRODeck' + (none.length ? ': ' + none.join('; ') : ''));
-}
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv.includes('--fetch-ygo')) {
-  fetchYgo().catch((e) => { console.error(e); process.exit(1); });
 }
