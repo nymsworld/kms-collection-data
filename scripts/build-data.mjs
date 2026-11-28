@@ -784,10 +784,6 @@ async function main() {
       cards: s.cards.map((c) => { const x = Object.assign({}, c); delete x.fromKms; return x; }) });
   }
   const builtAt = new Date().toISOString();
-<<<<<<< Updated upstream
-  writeJson(path.join(OUT, 'sets.json'), { builtAt, games: gamesOut, sets: list });
-  writePictures(path.join(OUT, 'pictures.json'), pictures);
-=======
   // Joined cards and sets (see MOVED), with last night's still missing (so an old ID keeps working after one night)
   const allIds = new Set(), allKeys = new Set(list.map((s) => s.k));
   all.forEach((s) => s.cards.forEach((c) => allIds.add(c.id)));
@@ -799,7 +795,7 @@ async function main() {
   Object.keys(moved.cards).forEach((id) => { if (allIds.has(id) || !allIds.has(moved.cards[id])) delete moved.cards[id]; });
   Object.keys(moved.sets).forEach((k) => { if (allKeys.has(k) || !allKeys.has(moved.sets[k])) delete moved.sets[k]; });
   writeJson(path.join(OUT, 'sets.json'), { builtAt, games: gamesOut, sets: list, moved });
->>>>>>> Stashed changes
+  writePictures(path.join(OUT, 'pictures.json'), pictures);
 
   // One compact table per game: string lists, then one row per card
   const setIndex = {};
