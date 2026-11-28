@@ -26,7 +26,7 @@ const TCGCSV = 'https://tcgcsv.com/tcgplayer';
 const POKEMON_CATEGORIES = { en: 3, ja: 85 };
 const RECHECK_DAYS = 7;          // free card APIs: a miss is asked again after a week
 const RECHECK_OFFICIAL_DAYS = 30; // the official databases (scripts/official-pictures.mjs): after a month
-const CACHE_VERSION = 2;          // a new version forgets the old misses (sources were added)
+const CACHE_VERSION = 3;          // a new version forgets the old misses (sources were added)
 // Yu-Gi-Oh! pictures hosted on the data site (YGOPRODeck asks for that): pictures/ygo/ in this repo, copied to the
 // site by the build; `node scripts/images.mjs --fetch-ygo` downloads the ones the live data still lacks
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -204,7 +204,9 @@ export async function addCardPictures(sets, collector, previous, games) {
       else { stat(s, 'left'); left[c.id] = [s.game, s.lang, s.name, c.n, c.no]; }
       return;
     }
-    const prev = prevExt[c.id];
+    let prev = prevExt[c.id];
+    // Version 2 kept Japanese "thumb" links that don't exist for newer folders: ask those again
+    if (prev && previous.v < 3 && /\/card_images\/thumb\//.test(prev[0])) prev = null;
     const slow = s.game === 'pokemon' && s.lang !== 'en';
     let url = '', at = today, failed = false;
     if (prev && (prev[0] || (sameVersion && prev[1] >= (slow ? cutoffOfficial : cutoff)))) { url = prev[0]; at = prev[1]; }
